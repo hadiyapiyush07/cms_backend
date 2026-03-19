@@ -33,13 +33,14 @@ router.get('/dashboard', protect, authorize('admin'), async (req, res) => {
 
 // ========== Student Management ==========
 
-// @desc    Get all students (with pagination & search)
+// @desc    Get all students (with pagination, search & filters)
 // @route   GET /api/admin/students
 // @access  Private (Admin only)
 router.get('/students', protect, authorize('admin'), async (req, res) => {
   try {
-    const { page = 1, limit = 10, search } = req.query;
+    const { page = 1, limit = 10, search, department, semester } = req.query;
     const query = {};
+
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
@@ -47,18 +48,29 @@ router.get('/students', protect, authorize('admin'), async (req, res) => {
         { email: { $regex: search, $options: 'i' } },
       ];
     }
+
+    if (department) {
+      query.department = department;
+    }
+
+    if (semester) {
+      query.semesterID = semester;
+    }
+
     const students = await Student.find(query)
       .populate('department', 'name code')
       .populate('semesterID', 'semesterName academicYear')
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort('-createdAt');
+
     const total = await Student.countDocuments(query);
+
     res.json({
       success: true,
       data: students,
       total,
-      page,
+      page: Number(page),
       pages: Math.ceil(total / limit),
     });
   } catch (error) {
@@ -123,20 +135,31 @@ router.post('/students', protect, authorize('admin'), async (req, res) => {
       password,
       isActive,
       profilePicture,
+      // 10th qualification fields
+      tenthBoard,
+      tenthAdmitNumber,
+      tenthPassingYear,
+      tenthMarksObtained,
+      // 12th qualification fields
+      twelfthBoard,
+      twelfthAdmitNumber,
+      twelfthPassingYear,
+      twelfthMarksObtained,
+      twelfthTotalMarks,
     } = req.body;
 
     // Check for existing student
     const existingStudent = await Student.findOne({
-      $or: [{ enrollmentNum }, { email }, { aadharNumber }], 
+      $or: [{ enrollmentNum }, { email }, { aadharNumber }],
     });
     if (existingStudent) {
       return res.status(400).json({
         success: false,
-        message: 'Student with this enrollment number or email or Aadhar Number already exists',
+        message: 'Student with this enrollment number, email, or Aadhar number already exists',
       });
     }
 
-    // Create student (plain password as per your requirement)
+    // Create student
     const student = new Student({
       enrollmentNum,
       aadharNumber,
@@ -170,6 +193,17 @@ router.post('/students', protect, authorize('admin'), async (req, res) => {
       password,
       isActive: isActive !== undefined ? isActive : true,
       profilePicture,
+      // 10th
+      tenthBoard,
+      tenthAdmitNumber,
+      tenthPassingYear,
+      tenthMarksObtained,
+      // 12th
+      twelfthBoard,
+      twelfthAdmitNumber,
+      twelfthPassingYear,
+      twelfthMarksObtained,
+      twelfthTotalMarks,
     });
 
     await student.save();
@@ -194,7 +228,11 @@ router.post('/students', protect, authorize('admin'), async (req, res) => {
 router.put('/students/:id', protect, authorize('admin'), async (req, res) => {
   try {
     const updates = req.body;
-    delete updates.password; // prevent password update here (use separate route)
+
+    // If password is empty or not provided, remove it from updates so it doesn't get overwritten
+    if (!updates.password || updates.password.trim() === '') {
+      delete updates.password;
+    }
 
     const student = await Student.findByIdAndUpdate(
       req.params.id,
