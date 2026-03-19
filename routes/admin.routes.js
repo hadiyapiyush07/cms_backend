@@ -1,7 +1,89 @@
 const express = require('express');
 const router = express.Router();
+const Admin = require('../models/Admin');
 const Student = require('../models/Student');
+const Professor = require('../models/Professor'); // if needed
 const { protect, authorize } = require('../middleware/auth.middleware');
+
+// ========== Dashboard ==========
+// @desc    Get admin dashboard stats
+// @route   GET /api/admin/dashboard
+// @access  Private (Admin only)
+router.get('/dashboard', protect, authorize('admin'), async (req, res) => {
+  try {
+    const totalStudents = await Student.countDocuments();
+    const activeStudents = await Student.countDocuments({ isActive: true });
+    const totalProfessors = await Professor.countDocuments(); // if you have Professor model
+    // Add more stats as needed
+
+    res.json({
+      success: true,
+      data: {
+        totalStudents,
+        activeStudents,
+        totalProfessors,
+        // ... other stats
+      },
+    });
+  } catch (error) {
+    console.error('Dashboard error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ========== Student Management ==========
+
+// @desc    Get all students (with pagination & search)
+// @route   GET /api/admin/students
+// @access  Private (Admin only)
+router.get('/students', protect, authorize('admin'), async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search } = req.query;
+    const query = {};
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { enrollmentNum: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ];
+    }
+    const students = await Student.find(query)
+      .populate('department', 'name code')
+      .populate('semesterID', 'semesterName academicYear')
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort('-createdAt');
+    const total = await Student.countDocuments(query);
+    res.json({
+      success: true,
+      data: students,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    console.error('Error fetching students:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @desc    Get single student by ID
+// @route   GET /api/admin/students/:id
+// @access  Private (Admin only)
+router.get('/students/:id', protect, authorize('admin'), async (req, res) => {
+  try {
+    const student = await Student.findById(req.params.id)
+      .populate('department', 'name code')
+      .populate('semesterID', 'semesterName academicYear');
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+    res.json({ success: true, data: student });
+  } catch (error) {
+    console.error('Error fetching student:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 // @desc    Create a new student
 // @route   POST /api/admin/students
@@ -38,23 +120,23 @@ router.post('/students', protect, authorize('admin'), async (req, res) => {
       department,
       semesterID,
       currentYear,
-      password,               // plain text password
+      password,
       isActive,
       profilePicture,
     } = req.body;
 
     // Check for existing student
     const existingStudent = await Student.findOne({
-      $or: [{ enrollmentNum }, { email }],
+      $or: [{ enrollmentNum }, { email }, { aadharNumber }], 
     });
     if (existingStudent) {
       return res.status(400).json({
         success: false,
-        message: 'Student with this enrollment number or email already exists',
+        message: 'Student with this enrollment number or email or Aadhar Number already exists',
       });
     }
 
-    // Create student with plain password
+    // Create student (plain password as per your requirement)
     const student = new Student({
       enrollmentNum,
       aadharNumber,
@@ -85,14 +167,13 @@ router.post('/students', protect, authorize('admin'), async (req, res) => {
       department,
       semesterID,
       currentYear,
-      password,            // stored as plain text
+      password,
       isActive: isActive !== undefined ? isActive : true,
       profilePicture,
     });
 
     await student.save();
 
-    // Remove password from response
     const studentResponse = student.toObject();
     delete studentResponse.password;
 
@@ -103,10 +184,48 @@ router.post('/students', protect, authorize('admin'), async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating student:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @desc    Update a student
+// @route   PUT /api/admin/students/:id
+// @access  Private (Admin only)
+router.put('/students/:id', protect, authorize('admin'), async (req, res) => {
+  try {
+    const updates = req.body;
+    delete updates.password; // prevent password update here (use separate route)
+
+    const student = await Student.findByIdAndUpdate(
+      req.params.id,
+      updates,
+      { new: true, runValidators: true }
+    ).populate('department semesterID');
+
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    res.json({ success: true, message: 'Student updated successfully', data: student });
+  } catch (error) {
+    console.error('Error updating student:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @desc    Delete a student (hard delete – adjust as needed)
+// @route   DELETE /api/admin/students/:id
+// @access  Private (Admin only)
+router.delete('/students/:id', protect, authorize('admin'), async (req, res) => {
+  try {
+    const student = await Student.findByIdAndDelete(req.params.id);
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+    res.json({ success: true, message: 'Student deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting student:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

@@ -48,4 +48,5 @@ return candidatePassword === this.password;
 };
 
 const Admin = mongoose.model('Admin', AdminSchema);
+// const Admin = mongoose.model('Admin', AdminSchema, 'admin');
 module.exports = Admin;

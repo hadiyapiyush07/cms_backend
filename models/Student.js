@@ -11,15 +11,15 @@ const studentSchema = new mongoose.Schema(
     },
     aadharNumber: {
       type: String,
-      sparse: true,                     // allow null/undefined but enforce uniqueness if present
+      sparse: true,
       unique: true,
       trim: true,
     },
-    password: { 
-      type: String, 
-      required: true 
+    password: {
+      type: String,
+      required: true,
     },
-    
+
     // ========== Personal Details ==========
     name: {
       type: String,
@@ -47,11 +47,11 @@ const studentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+
     // ========== Reservation / Category ==========
     category: {
       type: String,
       required: true,
-      // enum: ['GEN', 'OBC', 'SC', 'ST', 'EWS'],
     },
     caste: {
       type: String,
@@ -61,6 +61,7 @@ const studentSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+
     // ========== Contact & Address ==========
     email: {
       type: String,
@@ -92,7 +93,8 @@ const studentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    // ========== Parent / Guardian Information (Embedded) ==========
+
+    // ========== Parent / Guardian Information ==========
     fatherName: {
       type: String,
       trim: true,
@@ -103,7 +105,7 @@ const studentSchema = new mongoose.Schema(
     },
     guardianName: {
       type: String,
-      trim: true,                        // if different from parents
+      trim: true,
     },
     parentContact: {
       type: String,
@@ -118,12 +120,13 @@ const studentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    // ========== Academic Details =========
+
+    // ========== Academic Details ==========
     admissionYear: {
-      type: Number,                       // e.g., 2024 – can be derived from enrollmentNum
+      type: Number,
     },
     batch: {
-      type: String,                        // e.g., "2024-2027"
+      type: String,
     },
     department: {
       type: mongoose.Schema.Types.ObjectId,
@@ -136,11 +139,55 @@ const studentSchema = new mongoose.Schema(
       required: true,
     },
     currentYear: {
-      type: Number,                        // 1,2,3,4 (if program has years)
+      type: Number,
       min: 1,
       max: 3,
     },
-    
+
+    // ========== 10th Qualification Details ==========
+    tenthBoard: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    tenthAdmitNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    tenthPassingYear: {
+      type: Number,
+      default: null,
+    },
+    tenthMarksObtained: {
+      type: Number,
+      default: null,
+    },
+
+    // ========== 12th Qualification Details ==========
+    twelfthBoard: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    twelfthAdmitNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    twelfthPassingYear: {
+      type: Number,
+      default: null,
+    },
+    twelfthMarksObtained: {
+      type: Number,
+      default: null,
+    },
+    twelfthTotalMarks: {
+      type: Number,
+      default: null,
+    },
+
     // ========== System Fields ==========
     isActive: {
       type: Boolean,
@@ -153,11 +200,6 @@ const studentSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    // ========== References to Other Collections ==========
-    // Documents – stored in separate collection (see below)
-    // Education History – stored in separate collection
-    // Fee Records – stored in separate collection
-    // etc.
   },
   {
     timestamps: true,
