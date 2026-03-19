@@ -190,66 +190,125 @@ const professorLogin = async (req, res) => {
 // @desc    Admin Login
 // @route   POST /api/auth/admin/login
 // @access  Public
+// const adminLogin = async (req, res) => {
+//   try {
+//     console.log(" Admin login attempt received");
+//     console.log("Request body:", req.body);
+    
+//     const { email, password } = req.body;
+
+//     // Validate input
+//     if (!email || !password) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Please provide email and password"
+//       });
+//     }
+
+//     // Find admin by email
+//     const admin = await Admin.findOne({ email: email.toLowerCase() }).select("+password");
+//     if (!admin) {
+//       return res.status(401).json({
+//         success: false,
+//         message: "Invalid email or password"
+//       });
+//     }
+
+//     console.log(` Admin found: ${admin.name}`);
+
+//     // Verify password
+//     const isPasswordValid = await admin.comparePassword(password);
+//     if (!isPasswordValid) {
+//       return res.status(401).json({
+//         success: false,
+//         message: "Invalid email or password"
+//       });
+//     }
+
+//     // Generate token
+//     const token = generateToken(admin._id, "admin");
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Login successful",
+//       token,
+//       user: {
+//           id: admin._id,
+//           firstName: admin.firstName,
+//           lastName: admin.lastName,
+//           email: admin.email,
+//           phone: admin.phone,
+//           lastLogin: admin.lastLogin,
+//           isActive: admin.isActive,
+//           createdAt: admin.createdAt
+//         }
+//     });
+
+//   } catch (error) {
+//     console.error(" Admin login error:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "An error occurred during login. Please try again."
+//     });
+//   }
+// };
+
 const adminLogin = async (req, res) => {
   try {
-    console.log(" Admin login attempt received");
+    console.log("📌 Admin login attempt received");
     console.log("Request body:", req.body);
-    
+
     const { email, password } = req.body;
 
-    // Validate input
     if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide email and password"
-      });
+      return res.status(400).json({ success: false, message: "Please provide email and password" });
     }
 
-    // Find admin by email
+    console.log("🔍 Searching for admin with email:", email.toLowerCase());
+
+    // Find admin by email (explicitly select password)
     const admin = await Admin.findOne({ email: email.toLowerCase() }).select("+password");
+    
     if (!admin) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password"
-      });
+      console.log("❌ Admin NOT found in database");
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
-    console.log(` Admin found: ${admin.name}`);
+    console.log("✅ Admin found. ID:", admin._id);
+    console.log("Stored password (first 3 chars):", admin.password ? admin.password.substring(0,3) + '***' : 'undefined');
+    console.log("Entered password:", password);
 
-    // Verify password
+    // Verify password (plain text comparison)
     const isPasswordValid = await admin.comparePassword(password);
+    console.log("Password match result:", isPasswordValid);
+
     if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password"
-      });
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
-    // Generate token
+    // Update last login (optional)
+    admin.lastLogin = new Date();
+    await admin.save();
+
     const token = generateToken(admin._id, "admin");
 
-    res.status(200).json({
-      success: true,
-      message: "Login successful",
-      token,
-      user: {
-          id: admin._id,
-          firstName: admin.firstName,
-          lastName: admin.lastName,
-          email: admin.email,
-          phone: admin.phone,
-          lastLogin: admin.lastLogin,
-          isActive: admin.isActive,
-          createdAt: admin.createdAt
-        }
-    });
+    // Prepare user object (handle both field naming)
+    const userResponse = {
+      id: admin._id,
+      firstName: admin.firstName || admin.firstname,
+      lastName: admin.lastName || admin.lastname,
+      email: admin.email,
+      phone: admin.phone,
+      lastLogin: admin.lastLogin || admin.lastlogin,
+      isActive: admin.isActive,
+      createdAt: admin.createdAt
+    };
+
+    res.json({ success: true, message: "Login successful", token, user: userResponse });
 
   } catch (error) {
-    console.error(" Admin login error:", error);
-    res.status(500).json({
-      success: false,
-      message: "An error occurred during login. Please try again."
-    });
+    console.error("❌ Admin login error:", error);
+    res.status(500).json({ success: false, message: "An error occurred. Please try again." });
   }
 };
 
