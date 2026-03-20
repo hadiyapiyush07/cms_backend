@@ -5,6 +5,17 @@ const Student = require('../models/Student');
 const Professor = require('../models/Professor'); // if needed
 const { protect, authorize } = require('../middleware/auth.middleware');
 
+// @desc    Get admin profile
+// @route   GET /api/admin/profile
+// @access  Private (Admin only)
+router.get('/profile', protect, authorize('admin'), (req, res) => {
+  // req.user is already attached by the protect middleware
+  res.json({
+    success: true,
+    data: req.user
+  });
+});
+
 // ========== Dashboard ==========
 // @desc    Get admin dashboard stats
 // @route   GET /api/admin/dashboard
