@@ -41,6 +41,8 @@ const uploadRoutes = require("./routes/upload.routes");
 const eventsRoutes = require("./routes/events.routes");
 const semesterRoutes = require("./routes/semester.routes");
 const departmentRoutes = require("./routes/department.routes");
+const notificationRoutes = require('./routes/notification.routes');
+const path = require('path');
 
 //  Test route
 app.get("/api/test", (req, res) => {
@@ -83,6 +85,8 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/events", eventsRoutes);
 app.use('/api/semesters', semesterRoutes);
 app.use('/api/departments', departmentRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/uploads', express.static('uploads'));
 
 
