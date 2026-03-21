@@ -31,6 +31,7 @@ require("./models/Admin");
 require("./models/PasswordReset");  
 require("./models/Department");   
 const Semester = require("./models/Semester");
+const Subject = require("./models/Subject");
 
 //  Import routes
 const authRoutes = require("./routes/auth.routes");
@@ -40,7 +41,7 @@ const adminRoutes = require("./routes/admin.routes");
 const uploadRoutes = require("./routes/upload.routes");
 const eventsRoutes = require("./routes/events.routes");
 const semesterRoutes = require("./routes/semester.routes");
-
+const SubjectRoutes = require("./routes/subject.routes");
 const departmentRoutes = require("./routes/department.routes");
 const notificationRoutes = require('./routes/notification.routes');
 const path = require('path');
@@ -87,6 +88,7 @@ app.use("/api/events", eventsRoutes);
 app.use('/api/semesters', semesterRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use("/api/subjects",SubjectRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/uploads', express.static('uploads'));
 
