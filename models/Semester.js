@@ -14,11 +14,6 @@ const semesterSchema = new mongoose.Schema({
       'Semester 5', 'Semester 6'
     ]
   },
-  academicYear: {
-    type: String,
-    required: true,
-    match: [/^\d{4}-\d{4}$/, 'Academic year must be in format YYYY-YYYY']
-  },
   isActive: {
     type: Boolean,
     default: true
