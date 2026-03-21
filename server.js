@@ -4,7 +4,6 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-
 require("dotenv").config();
 
 const app = express();
@@ -25,14 +24,13 @@ mongoose.connect(process.env.MONGO_URL || "mongodb://localhost:27017/campusflow"
   .then(() => console.log(" MongoDB Connected Successfully"))
   .catch(err => console.log(" MongoDB Connection Error:", err));
 
-// Import models
+// ✅ Import models
 require("./models/Student");
 require("./models/Professor");
 require("./models/Admin");     
 require("./models/PasswordReset");  
 require("./models/Department");   
 const Semester = require("./models/Semester");
-const Subject = require("./models/Subject");
 
 //  Import routes
 const authRoutes = require("./routes/auth.routes");
@@ -42,13 +40,10 @@ const adminRoutes = require("./routes/admin.routes");
 const uploadRoutes = require("./routes/upload.routes");
 const eventsRoutes = require("./routes/events.routes");
 const semesterRoutes = require("./routes/semester.routes");
+
 const departmentRoutes = require("./routes/department.routes");
-<<<<<<< Updated upstream
 const notificationRoutes = require('./routes/notification.routes');
 const path = require('path');
-=======
-const subjectRoutes = require("./routes/subject.routes");
->>>>>>> Stashed changes
 
 //  Test route
 app.get("/api/test", (req, res) => {
@@ -85,20 +80,17 @@ app.use((req, res, next) => {
 //  Use routes
 app.use("/api/auth", authRoutes);
 app.use("/api", studentRoutes);
-app.use("/api/professor", professorRoutes); //  FIXED: Changed from "/api/professors" to "/api/professor"
-console.log("Professor route mounted at /api/professor");
+app.use("/api/professor", professorRoutes);
 app.use("/api/admin", adminRoutes);                   
 app.use("/api/upload", uploadRoutes);
 app.use("/api/events", eventsRoutes);
 app.use('/api/semesters', semesterRoutes);
 app.use('/api/departments', departmentRoutes);
-<<<<<<< Updated upstream
 app.use('/api/notifications', notificationRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-=======
-app.use("/api/subjects", subjectRoutes);
->>>>>>> Stashed changes
 app.use('/uploads', express.static('uploads'));
+
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {

@@ -169,7 +169,7 @@ router.post('/students', protect, authorize('admin'), async (req, res) => {
         message: 'Student with this enrollment number, email, or Aadhar number already exists',
       });
     }
-
+  
     // Create student
     const student = new Student({
       enrollmentNum,
