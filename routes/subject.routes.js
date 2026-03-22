@@ -1,181 +1,166 @@
 const express = require("express");
 const router = express.Router();
 const Subject = require("../models/Subject");
-const mongoose = require("mongoose");
-const { protect } = require('../middleware/auth.middleware');
+const Semester = require("../models/Semester");
+const Department = require("../models/Department");
+const { protect, authorize } = require('../middleware/auth.middleware');
 
-// ✅ Get subjects by department - FIXED VERSION
+// Helper: numeric semester → semesterName
+const getSemesterName = (num) => `Semester ${num}`;
+
+// ---------------------------------------------------------------------
+// GET subjects by department & optional semester
+// ---------------------------------------------------------------------
 router.get("/", protect, async (req, res) => {
   try {
-    const { department } = req.query;
+    const { department, semester } = req.query;
 
-    console.log("=".repeat(50));
-    console.log("🔍 SUBJECT FETCH DEBUG");
-    console.log("=".repeat(50));
-    console.log("Requested department ID:", department);
-    
     if (!department) {
-      return res.status(400).json({ 
-        success: false,
-        message: "Department ID is required" 
-      });
+      return res.status(400).json({ success: false, message: "Department ID required" });
     }
 
-    // Convert department ID to string for comparison
     const deptIdString = department.toString();
-    
-    // Method 1: Query with string comparison (MOST RELIABLE)
-    // This will find subjects regardless of whether department is stored as String or ObjectId
-    const subjects = await Subject.find({
-      $expr: {
-        $eq: [
-          { $toString: "$department" },
-          deptIdString
-        ]
-      }
-    }).populate('department', 'name code').lean();
+    let filter = {
+      $expr: { $eq: [{ $toString: "$department" }, deptIdString] }
+    };
 
-    console.log(`✅ Found ${subjects.length} subjects using string comparison`);
-    
-    // If no subjects found with string comparison, try ObjectId comparison
-    if (subjects.length === 0 && mongoose.Types.ObjectId.isValid(deptIdString)) {
-      const objectId = new mongoose.Types.ObjectId(deptIdString);
-      const subjects2 = await Subject.find({ department: objectId })
-        .populate('department', 'name code')
-        .lean();
-      
-      console.log(`Found ${subjects2.length} subjects using ObjectId comparison`);
-      
-      if (subjects2.length > 0) {
-        return res.json({
-          success: true,
-          data: subjects2,
-          count: subjects2.length,
-          department: department
-        });
+    if (semester) {
+      const semNum = parseInt(semester);
+      const semesterDoc = await Semester.findOne({ semesterName: getSemesterName(semNum) });
+      if (!semesterDoc) {
+        return res.json({ success: true, data: [], count: 0 });
       }
+      filter.semester = semesterDoc._id;
     }
-    
-    res.json({
-      success: true,
-      data: subjects,
-      count: subjects.length,
-      department: department
-    });
-    
-  } catch (err) {
-    console.error("❌ Error fetching subjects:", err);
-    res.status(500).json({ 
-      success: false,
-      message: err.message
-    });
-  }
-});
 
-// ✅ Debug endpoint to see all subjects
-router.get("/debug/all", protect, async (req, res) => {
-  try {
-    console.log("🔍 Debug endpoint called");
-    
-    // Get all subjects with department populated
-    const subjects = await Subject.find()
+    let subjects = await Subject.find(filter)
       .populate('department', 'name code')
+      .populate('semester', 'semesterName')
       .lean();
-    
-    // Get all departments
-    const Department = mongoose.model('Department');
-    const departments = await Department.find().lean();
-    
-    // Get counts
-    const totalSubjects = await Subject.countDocuments();
-    const totalDepartments = await Department.countDocuments();
-    
-    // Format subjects for easier viewing
-    const formattedSubjects = subjects.map(s => ({
-      id: s._id,
-      name: s.name,
-      code: s.code,
-      semester: s.semester,
-      departmentId: s.department?._id || s.department,
-      departmentName: s.department?.name || 'Unknown',
-      departmentIdType: typeof (s.department?._id || s.department)
+
+    subjects = subjects.map(sub => ({
+      ...sub,
+      semester: sub.semester ? parseInt(sub.semester.semesterName.split(' ')[1]) : null
     }));
-    
-    console.log(`Debug: Found ${totalSubjects} subjects and ${totalDepartments} departments`);
-    
-    res.json({
-      success: true,
-      stats: {
-        totalSubjects,
-        totalDepartments
-      },
-      subjects: formattedSubjects,
-      departments: departments.map(d => ({
-        id: d._id,
-        name: d.name,
-        code: d.code
-      }))
-    });
+
+    res.json({ success: true, data: subjects, count: subjects.length });
   } catch (err) {
-    console.error("Debug endpoint error:", err);
-    res.status(500).json({ 
-      success: false, 
-      error: err.message 
-    });
+    console.error("GET subjects error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ✅ Check specific department with detailed debugging
-router.get("/debug/check/:deptId", protect, async (req, res) => {
+// ---------------------------------------------------------------------
+// GET next available subject code (e.g., BCA-101T)
+// ---------------------------------------------------------------------
+router.get("/next-code", protect, authorize("admin"), async (req, res) => {
   try {
-    const { deptId } = req.params;
-    
-    console.log("🔍 Checking department:", deptId);
-    
-    // Get all subjects
-    const allSubjects = await Subject.find().lean();
-    
-    // Method 1: String comparison
-    const deptIdString = deptId.toString();
-    const stringMatch = allSubjects.filter(subject => {
-      const subjectDept = subject.department ? subject.department.toString() : '';
-      return subjectDept === deptIdString;
-    });
-    
-    // Method 2: ObjectId comparison
-    let objectIdMatch = [];
-    if (mongoose.Types.ObjectId.isValid(deptIdString)) {
-      const objectId = new mongoose.Types.ObjectId(deptIdString);
-      objectIdMatch = allSubjects.filter(subject => {
-        const subjectDept = subject.department ? subject.department.toString() : '';
-        return subjectDept === objectId.toString();
-      });
+    const { department, semester, type } = req.query;
+    if (!department || !semester || !type) {
+      return res.status(400).json({ success: false, message: "Missing parameters" });
     }
-    
-    // Get sample of what's in the database
-    const sampleSubjects = allSubjects.slice(0, 5).map(s => ({
-      name: s.name,
-      code: s.code,
-      department: s.department,
-      departmentType: typeof s.department,
-      departmentString: s.department ? s.department.toString() : null
-    }));
-    
-    res.json({
-      success: true,
-      departmentId: deptId,
-      departmentIdString: deptIdString,
-      counts: {
-        asString: stringMatch.length,
-        asObjectId: objectIdMatch.length
-      },
-      sampleSubjects: sampleSubjects,
-      allSubjectsCount: allSubjects.length,
-      note: "If counts are 0 but subjects exist, check the department ID format in your subjects collection"
+
+    // Get department code (e.g., "BCA")
+    const deptDoc = await Department.findById(department);
+    if (!deptDoc) {
+      return res.status(400).json({ success: false, message: "Invalid department" });
+    }
+    const deptCode = deptDoc.code;
+
+    // Convert numeric semester (1-6) to semester name and get the semester document
+    const semNum = parseInt(semester);
+    const semesterDoc = await Semester.findOne({ semesterName: getSemesterName(semNum) });
+    if (!semesterDoc) {
+      return res.status(400).json({ success: false, message: "Invalid semester" });
+    }
+
+    const suffix = type === "theory" ? "T" : "P";
+    // Pattern: ^BCA-1\d{2}T$  (hyphen included)
+    const pattern = `^${deptCode}-${semNum}\\d{2}${suffix}$`;
+    const regex = new RegExp(pattern);
+
+    const subjects = await Subject.find({ code: { $regex: regex } }).lean();
+    let maxSeq = 0;
+    subjects.forEach(sub => {
+      const match = sub.code.match(new RegExp(`${deptCode}-${semNum}(\\d{2})${suffix}`));
+      if (match) {
+        const seq = parseInt(match[1], 10);
+        if (seq > maxSeq) maxSeq = seq;
+      }
     });
+
+    const nextSeq = maxSeq + 1;
+    const nextCode = `${deptCode}-${semNum}${nextSeq.toString().padStart(2, "0")}${suffix}`;
+
+    res.json({ success: true, code: nextCode });
   } catch (err) {
-    console.error("Check endpoint error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("Next-code error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------
+// ADD subject (admin only)
+// ---------------------------------------------------------------------
+router.post("/", protect, authorize("admin"), async (req, res) => {
+  try {
+    const { name, code, department, semester } = req.body;
+
+    if (!name || !code || !department || !semester) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    const semNum = parseInt(semester);
+    const semesterDoc = await Semester.findOne({ semesterName: getSemesterName(semNum) });
+    if (!semesterDoc) {
+      return res.status(400).json({ success: false, message: `Semester ${semNum} does not exist` });
+    }
+
+    // Check duplicates
+    const existing = await Subject.findOne({ $or: [{ name }, { code }] });
+    if (existing) {
+      const field = existing.name === name ? 'name' : 'code';
+      return res.status(400).json({ success: false, message: `${field} already exists` });
+    }
+
+    const newSubject = new Subject({
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+      department,
+      semester: semesterDoc._id
+    });
+
+    await newSubject.save();
+
+    const populated = await Subject.findById(newSubject._id)
+      .populate('department', 'name code')
+      .populate('semester', 'semesterName')
+      .lean();
+
+    populated.semester = populated.semester ? parseInt(populated.semester.semesterName.split(' ')[1]) : null;
+
+    res.status(201).json({ success: true, data: populated, message: "Subject added" });
+  } catch (err) {
+    if (err.code === 11000) {
+      const field = Object.keys(err.keyPattern)[0];
+      return res.status(400).json({ success: false, message: `${field} already exists` });
+    }
+    console.error("POST subject error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------
+// DELETE subject (admin only)
+// ---------------------------------------------------------------------
+router.delete("/:id", protect, authorize("admin"), async (req, res) => {
+  try {
+    const deleted = await Subject.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ success: false, message: "Subject not found" });
+    res.json({ success: true, message: "Subject deleted" });
+  } catch (err) {
+    console.error("DELETE subject error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

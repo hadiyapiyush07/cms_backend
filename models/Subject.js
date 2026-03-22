@@ -15,7 +15,7 @@ const subjectSchema = new mongoose.Schema({
     trim: true,
     uppercase: true,
     maxlength: [10, 'Subject code cannot exceed 10 characters'],
-    match: [/^[A-Z0-9]+$/, 'Subject code can only contain uppercase letters and numbers']
+    match: [/^[A-Z0-9-.,]+$/, 'Subject code can only contain uppercase letters and numbers']
   },
   department: {
     type: mongoose.Schema.Types.ObjectId,
@@ -24,10 +24,9 @@ const subjectSchema = new mongoose.Schema({
     index: true
   },
   semester: {
-    type: Number,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Semester',     
     required: [true, 'Semester is required'],
-    min: 1,
-    max: 8,
     index: true
   },
 
@@ -54,6 +53,7 @@ subjectSchema.statics.findByDepartment = function(departmentId) {
 subjectSchema.statics.findByDepartmentAndSemester = function(departmentId, semester) {
   return this.find({ department: departmentId, semester, isActive: true })
     .sort({ name: 1 });
+    
 };
 
 // Instance methods
