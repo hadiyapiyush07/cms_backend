@@ -284,13 +284,15 @@ router.delete("/:id", async (req, res) => {
 router.get('/profile/:email', async (req, res) => {
   try {
     const { email } = req.params;
-    
     console.log('🔍 BACKEND: Fetching professor with email:', email);
     
     const professor = await Professor.findOne({ email })
       .select('-password')
       .populate('department', 'name code description')
-      .populate('coursesTaught', 'name code credits semester description');
+      .populate({
+        path: 'coursesTaught',
+        populate: { path: 'semester', select: 'semesterName' }   // 👈 populate semester inside subjects
+      });
     
     if (!professor) {
       return res.status(404).json({
