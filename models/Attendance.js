@@ -1,7 +1,8 @@
+// models/Attendance.js
 const mongoose = require('mongoose');
 
 const attendanceSchema = new mongoose.Schema({
-  date: { type: Date, required: true },
+  date: { type: String, required: true }, // YYYY-MM-DD
   subject: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject', required: true },
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
   status: { type: String, enum: ['present', 'absent'], default: 'absent' },

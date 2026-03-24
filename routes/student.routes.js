@@ -1,9 +1,12 @@
 // routes/student.routes.js
+const { protect, authorize } = require('../middleware/auth.middleware');
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 const Student = require("../models/Student");
 const Semester = require("../models/Semester");
+const Subject = require('../models/Subject');
+const Attendance = require('../models/Attendance');
 const Department = require("../models/Department");
 
 // GET student profile by enrollment number
@@ -66,6 +69,62 @@ router.get('/student/profile/:enrollmentNum', async (req, res) => {
       success: false,
       message: error.message
     });
+  } `8`
+});
+
+// GET student attendance summary
+router.get('/student/attendance', protect, authorize('student'), async (req, res) => {
+  try {
+    const studentId = req.user._id;
+    const student = await Student.findById(studentId).populate('department semesterID');
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    // Get all subjects for the student's department and semester
+    const subjects = await Subject.find({
+      department: student.department._id,
+      semester: student.semesterID._id,
+      isActive: true
+    }).select('name code');
+
+    // Calculate attendance per subject
+    const subjectStats = await Promise.all(subjects.map(async (subject) => {
+      const totalSessions = await Attendance.distinct('date', { subject: subject._id }).then(dates => dates.length);
+      const attended = await Attendance.countDocuments({ subject: subject._id, student: studentId, status: 'present' });
+      return {
+        subject: subject.name,
+        code: subject.code,
+        totalSessions,
+        attended,
+        percentage: totalSessions === 0 ? 0 : (attended / totalSessions) * 100
+      };
+    }));
+
+    // Overall attendance (across all subjects)
+    const allSessions = await Attendance.aggregate([
+      { $match: { student: studentId } },
+      { $group: { _id: { date: '$date', subject: '$subject' } } },
+      { $count: 'total' }
+    ]);
+    const totalSessionsAll = allSessions.length ? allSessions[0].total : 0;
+    const attendedAll = await Attendance.countDocuments({ student: studentId, status: 'present' });
+    const overallPercentage = totalSessionsAll === 0 ? 0 : (attendedAll / totalSessionsAll) * 100;
+
+    res.json({
+      success: true,
+      data: {
+        subjects: subjectStats,
+        overall: {
+          totalSessions: totalSessionsAll,
+          attended: attendedAll,
+          percentage: overallPercentage
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching student attendance:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
