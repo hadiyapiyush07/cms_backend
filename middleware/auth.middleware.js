@@ -76,6 +76,9 @@ const protect = async (req, res, next) => {
 // Role-based authorization
 const authorize = (...roles) => {
   return (req, res, next) => {
+    if (!req.userRole) {
+      return res.status(401).json({ success: false, message: 'User not authenticated' });
+    }
     if (!roles.includes(req.userRole)) {
       console.log(`❌ Unauthorized role: ${req.userRole}, required: ${roles.join(", ")}`);
       return res.status(403).json({

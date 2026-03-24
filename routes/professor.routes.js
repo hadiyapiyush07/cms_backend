@@ -313,99 +313,7 @@ router.get('/profile/:email', async (req, res) => {
   }
 });
 
-// ========== ATTENDANCE MANAGEMENT ROUTES (UPDATED) ==========
-
-// GET semesters that the professor teaches (based on subject semester numbers)
-router.get('/attendance/semesters', protect, authorize('professor'), async (req, res) => {
-  try {
-    const professorId = req.user._id;
-    const professor = await Professor.findById(professorId).populate('coursesTaught');
-    if (!professor) {
-      return res.status(404).json({ success: false, message: 'Professor not found' });
-    }
-
-    // Collect unique semester numbers from subjects
-    const semesterNumbers = new Set();
-    for (const subject of professor.coursesTaught) {
-      if (subject.semester && typeof subject.semester === 'number') {
-        semesterNumbers.add(subject.semester);
-      }
-    }
-
-    if (semesterNumbers.size === 0) {
-      return res.json({ success: true, data: [] });
-    }
-
-    // Find Semester documents that match the semester numbers (assuming semesterName is "Semester X")
-    const semesters = [];
-    for (const num of semesterNumbers) {
-      const semDoc = await Semester.findOne({ semesterName: `Semester ${num}` });
-      if (semDoc) semesters.push(semDoc);
-    }
-    res.json({ success: true, data: semesters });
-  } catch (error) {
-    console.error('Error fetching semesters:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// GET subjects for a given semester taught by the professor
-router.get('/attendance/semesters/:semesterId/subjects', protect, authorize('professor'), async (req, res) => {
-  try {
-    const { semesterId } = req.params;
-    const professorId = req.user._id;
-    const professor = await Professor.findById(professorId).populate('coursesTaught');
-    if (!professor) {
-      return res.status(404).json({ success: false, message: 'Professor not found' });
-    }
-    // Find the semester document to get its number
-    const semesterDoc = await Semester.findById(semesterId);
-    if (!semesterDoc) {
-      return res.json({ success: true, data: [] });
-    }
-    const match = semesterDoc.semesterName.match(/\d+/);
-    if (!match) return res.json({ success: true, data: [] });
-    const semNum = parseInt(match[0]);
-    const subjects = professor.coursesTaught.filter(subject => subject.semester === semNum);
-    res.json({ success: true, data: subjects });
-  } catch (error) {
-    console.error('Error fetching subjects:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// GET students for a subject – all students in the same department and semester as the subject
-router.get('/attendance/subjects/:subjectId/students', protect, authorize('professor'), async (req, res) => {
-  try {
-    const { subjectId } = req.params;
-    const subject = await Subject.findById(subjectId).populate('department');
-    if (!subject) {
-      return res.status(404).json({ success: false, message: 'Subject not found' });
-    }
-    // Verify professor teaches this subject
-    const professor = await Professor.findById(req.user._id);
-    if (!professor.coursesTaught.includes(subjectId)) {
-      return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
-    }
-    // Determine the semester ObjectId from the subject's semester number
-    let semesterId = null;
-    if (subject.semester && typeof subject.semester === 'number') {
-      const semesterDoc = await Semester.findOne({ semesterName: `Semester ${subject.semester}` });
-      if (semesterDoc) semesterId = semesterDoc._id;
-    }
-    if (!semesterId) {
-      return res.json({ success: true, data: [] });
-    }
-    const students = await Student.find({
-      department: subject.department._id,
-      semesterID: semesterId,
-    }).select('name enrollmentNum email');
-    res.json({ success: true, data: students });
-  } catch (error) {
-    console.error('Error fetching students:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
+// ========== UPDATED ROUTES =========
 
 // POST mark attendance for a specific subject on a given date
 router.post('/attendance/mark', protect, authorize('professor'), async (req, res) => {
@@ -414,16 +322,14 @@ router.post('/attendance/mark', protect, authorize('professor'), async (req, res
     if (!subjectId || !date || !attendance || !attendance.length) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
-    // Verify professor teaches this subject
     const professor = await Professor.findById(req.user._id);
     if (!professor.coursesTaught.includes(subjectId)) {
       return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
     }
-    const dateObj = new Date(date);
-    dateObj.setHours(0, 0, 0, 0);
+    const dateStr = date; // already YYYY-MM-DD
     const operations = attendance.map(entry => ({
       updateOne: {
-        filter: { date: dateObj, subject: subjectId, student: entry.studentId },
+        filter: { date: dateStr, subject: subjectId, student: entry.studentId },
         update: { $set: { status: entry.status, recordedBy: req.user._id } },
         upsert: true,
       },
@@ -507,37 +413,88 @@ router.get('/attendance/statistics', protect, authorize('professor'), async (req
   }
 });
 
+router.get('/attendance/subjects/:subjectId/students', protect, authorize('professor'), async (req, res) => {
+  try {
+    const { subjectId } = req.params;
+    const subject = await Subject.findById(subjectId).populate('department semester');
+    if (!subject) {
+      return res.status(404).json({ success: false, message: 'Subject not found' });
+    }
+    // Verify professor teaches this subject
+    const professor = await Professor.findById(req.user._id);
+    if (!professor.coursesTaught.includes(subjectId)) {
+      return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
+    }
+    // Use the semester ObjectId directly (since Subject model stores semester as ObjectId)
+    const semesterId = subject.semester?._id || subject.semester;
+    if (!semesterId) {
+      return res.json({ success: true, data: [] });
+    }
+    const students = await Student.find({
+      department: subject.department._id,
+      semesterID: semesterId,
+    }).select('name enrollmentNum email');
+    res.json({ success: true, data: students });
+  } catch (error) {
+    console.error('Error fetching students:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET attendance for a subject on a specific date (professor report)
+router.get('/attendance/subject/:subjectId/date/:date', protect, authorize('professor'), async (req, res) => {
+  try {
+    const { subjectId, date } = req.params;
+    const subject = await Subject.findById(subjectId).populate('department semester');
+    if (!subject) {
+      return res.status(404).json({ success: false, message: 'Subject not found' });
+    }
+    // Verify professor teaches this subject
+    const professor = await Professor.findById(req.user._id);
+    if (!professor.coursesTaught.includes(subjectId)) {
+      return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
+    }
+    // Get all students in the subject's department and semester
+    const students = await Student.find({
+      department: subject.department._id,
+      semesterID: subject.semester._id,
+    }).select('name enrollmentNum email');
+    // Fetch attendance records for this subject and date
+    const attendanceRecords = await Attendance.find({
+      subject: subjectId,
+      date: date, // assuming date is stored as string YYYY-MM-DD
+      student: { $in: students.map(s => s._id) }
+    });
+    // Map status to each student
+    const attendanceMap = new Map();
+    attendanceRecords.forEach(rec => {
+      attendanceMap.set(rec.student.toString(), rec.status);
+    });
+    const result = students.map(student => ({
+      _id: student._id,
+      name: student.name,
+      enrollmentNum: student.enrollmentNum,
+      status: attendanceMap.get(student._id.toString()) || 'absent'
+    }));
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Error fetching attendance:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // NEW: GET all subjects taught by the professor (for direct subject listing)
 router.get('/attendance/subjects', protect, authorize('professor'), async (req, res) => {
   try {
     const professorId = req.user._id;
     const professor = await Professor.findById(professorId).populate({
       path: 'coursesTaught',
-      populate: { path: 'department', select: 'name code' }
+      populate: { path: 'department semester', select: 'name code semesterName' }
     });
     if (!professor) {
       return res.status(404).json({ success: false, message: 'Professor not found' });
     }
-
-    // For each subject, fetch the corresponding semester document based on its semester number
-    const subjects = await Promise.all(professor.coursesTaught.map(async (subject) => {
-      if (subject.semester && typeof subject.semester === 'number') {
-        const semesterDoc = await Semester.findOne({ semesterName: `Semester ${subject.semester}` });
-        if (semesterDoc) {
-          subject = subject.toObject(); // convert to plain object to add semester field
-          subject.semester = semesterDoc;
-        } else {
-          subject.semester = null;
-        }
-      } else if (subject.semester && typeof subject.semester === 'object' && subject.semester._id) {
-        // Already populated (if subject model ever changes)
-      } else {
-        subject.semester = null;
-      }
-      return subject;
-    }));
-
-    res.json({ success: true, data: subjects });
+    res.json({ success: true, data: professor.coursesTaught });
   } catch (error) {
     console.error('Error fetching subjects:', error);
     res.status(500).json({ success: false, message: error.message });
