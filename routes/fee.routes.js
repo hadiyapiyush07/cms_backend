@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');          // for receipt
 const Fee = require('../models/Fee');
 const PaymentOrder = require('../models/PaymentOrder');
 const Student = require('../models/Student');
@@ -15,23 +16,28 @@ const razorpay = new Razorpay({
 
 const SEMESTER_FEE = 100; // ₹1
 
-// Helper: get current semester number
-const getCurrentSemesterNumber = async (student) => {
-  if (!student.semesterID) return 1;
-  const semDoc = await Semester.findById(student.semesterID);
-  if (!semDoc) return 1;
-  const match = semDoc.semesterName.match(/\d+/);
-  return match ? parseInt(match[0]) : 1;
-};
-
-// GET fee status
+// GET fee status (student)
 router.get('/status', protect, authorize('student'), async (req, res) => {
   try {
     const student = await Student.findById(req.user._id);
-    if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
 
-    const currentSem = await getCurrentSemesterNumber(student);
-    const totalSemesters = Math.min(currentSem, 6);
+    // Determine current semester number safely
+    let currentSemNumber = 1;
+    if (student.semesterID) {
+      try {
+        const semDoc = await Semester.findById(student.semesterID);
+        if (semDoc && semDoc.semesterName) {
+          const match = semDoc.semesterName.match(/\d+/);
+          if (match) currentSemNumber = parseInt(match[0]);
+        }
+      } catch (err) {
+        console.warn('Could not fetch semester, defaulting to 1');
+      }
+    }
+    const totalSemesters = Math.min(currentSemNumber, 6);
 
     const fees = await Fee.find({ student: req.user._id });
     const feeMap = new Map();
@@ -46,11 +52,13 @@ router.get('/status', protect, authorize('student'), async (req, res) => {
         paid: fee ? fee.paid : false,
         receipt: fee ? fee.receipt : null,
         paidAt: fee ? fee.paidAt : null,
+        _id: fee ? fee._id : null,      // ← added for receipt
       });
     }
+
     res.json({ success: true, data: semestersData });
   } catch (error) {
-    console.error('Fee status error:', error);
+    console.error('❌ Fee status error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -257,6 +265,7 @@ router.get('/admin/semester-wise', protect, authorize('admin'), async (req, res)
           amount: fee ? fee.amount : 100, // default ₹1
           receipt: fee ? fee.receipt : null,
           paidAt: fee ? fee.paidAt : null,
+           _id: fee ? fee._id : null,
         });
       }
 
@@ -289,4 +298,201 @@ router.get('/admin/semester-wise', protect, authorize('admin'), async (req, res)
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+// GET receipt for a paid fee record
+router.get('/receipt/:feeId', async (req, res) => {
+  try {
+    const { feeId } = req.params;
+    const token = req.query.token;
+    if (!token) return res.status(401).send('Unauthorized');
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).send('Invalid or expired token');
+    }
+
+    const fee = await Fee.findById(feeId)
+      .populate('student', 'name enrollmentNum email department semesterID')
+      .populate({
+        path: 'student',
+        populate: [
+          { path: 'department', select: 'name code' },
+          { path: 'semesterID', select: 'semesterName' }
+        ]
+      });
+    if (!fee) return res.status(404).send('Fee record not found');
+    if (fee.student._id.toString() !== decoded.id) return res.status(403).send('Not authorized');
+    if (!fee.paid) return res.status(400).send('Fee not paid');
+
+    const student = fee.student;
+    const amountRupees = (fee.amount / 100).toFixed(2);
+    const paidDate = new Date(fee.paidAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+    const receiptId = fee.receipt || fee._id.toString();
+
+    const html = `<!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Fee Receipt</title>
+      <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .receipt { max-width: 700px; width: 100%; background: white; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); overflow: hidden; border: 1px solid #e2e8f0; }
+        .receipt-header { background: linear-gradient(135deg, #1e3a8a, #1e40af); color: white; padding: 24px; text-align: center; }
+        .receipt-header h1 { margin: 0; font-size: 28px; font-weight: 700; }
+        .receipt-header p { margin: 8px 0 0; opacity: 0.9; }
+        .receipt-body { padding: 24px; }
+        .info-row { display: flex; justify-content: space-between; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #e2e8f0; }
+        .info-label { font-weight: 600; color: #4b5563; }
+        .info-value { color: #111827; }
+        .payment-details { background: #f9fafb; border-radius: 12px; padding: 16px; margin: 20px 0; }
+        .payment-details table { width: 100%; border-collapse: collapse; }
+        .payment-details td { padding: 8px 0; }
+        .payment-details td:last-child { text-align: right; font-weight: 600; }
+        .total { font-size: 18px; font-weight: 700; border-top: 2px solid #e2e8f0; margin-top: 12px; padding-top: 12px; }
+        .footer { text-align: center; margin-top: 24px; font-size: 12px; color: #6b7280; border-top: 1px solid #e2e8f0; padding-top: 16px; }
+        button { background: #1e40af; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; margin-top: 16px; }
+        button:hover { background: #1e3a8a; }
+        @media print { body { background: white; padding: 0; } .receipt { box-shadow: none; border: none; } button { display: none; } }
+      </style>
+    </head>
+    <body>
+      <div class="receipt">
+        <div class="receipt-header">
+          <h1>CAMPUS FLOW</h1>
+          <p>Official Fee Receipt</p>
+        </div>
+        <div class="receipt-body">
+          <div class="info-row"><span class="info-label">Receipt No.</span><span class="info-value">${receiptId}</span></div>
+          <div class="info-row"><span class="info-label">Date</span><span class="info-value">${paidDate}</span></div>
+          <div class="info-row"><span class="info-label">Student Name</span><span class="info-value">${student.name}</span></div>
+          <div class="info-row"><span class="info-label">Enrollment No.</span><span class="info-value">${student.enrollmentNum}</span></div>
+          <div class="info-row"><span class="info-label">Department</span><span class="info-value">${student.department?.name || 'N/A'}</span></div>
+          <div class="info-row"><span class="info-label">Current Semester</span><span class="info-value">${student.semesterID?.semesterName || 'N/A'}</span></div>
+          <div class="payment-details">
+            <table>
+              <tr><td>Semester ${fee.semester} Fee</td><td>₹${amountRupees}</td> </tr>
+             </table>
+            <div class="total"><div style="display: flex; justify-content: space-between;"><span>Total Paid</span><span>₹${amountRupees}</span></div></div>
+          </div>
+          <div class="footer">
+            <p>This is a computer-generated receipt. No signature required.</p>
+            <p>Thank you for using Campus Flow.</p>
+          </div>
+        </div>
+        <div style="text-align: center; padding: 0 24px 24px;"><button onclick="window.print()">Print / Save as PDF</button></div>
+      </div>
+    </body>
+    </html>`;
+    res.send(html);
+  } catch (error) {
+    console.error('Receipt error:', error);
+    res.status(500).send('Server error');
+  }
+});
+
+// router.get('/receipt/:feeId', async (req, res) => {
+//   try {
+//     const { feeId } = req.params;
+//     const token = req.query.token;
+//     if (!token) return res.status(401).send('Unauthorized');
+
+//     let decoded;
+//     try {
+//       decoded = jwt.verify(token, process.env.JWT_SECRET);
+//     } catch (err) {
+//       return res.status(401).send('Invalid or expired token');
+//     }
+
+//     const fee = await Fee.findById(feeId)
+//       .populate('student', 'name enrollmentNum email department semesterID')
+//       .populate({
+//         path: 'student',
+//         populate: [
+//           { path: 'department', select: 'name code' },
+//           { path: 'semesterID', select: 'semesterName' }
+//         ]
+//       });
+//     if (!fee) return res.status(404).send('Fee record not found');
+//     if (fee.student._id.toString() !== decoded.id) return res.status(403).send('Not authorized');
+//     if (!fee.paid) return res.status(400).send('Fee not paid');
+
+//     const student = fee.student;
+//     const amountRupees = (fee.amount / 100).toFixed(2);
+//     const paidDate = new Date(fee.paidAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+
+//     // Generate a shorter receipt ID (last 12 characters of original receipt or fee ID)
+//     let receiptId;
+//     if (fee.receipt) {
+//       // If receipt exists, take last 12 characters
+//       receiptId = fee.receipt.slice(-12);
+//     } else {
+//       // Otherwise, take last 12 characters of the fee _id
+//       receiptId = fee._id.toString().slice(-12);
+//     }
+//     // Alternatively, you can create a custom format: e.g., "RCP-20250327-XXXX"
+//     // receiptId = `RCP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${fee._id.toString().slice(-6)}`;
+
+//     const html = `<!DOCTYPE html>
+//     <html>
+//     <head>
+//       <meta charset="UTF-8">
+//       <title>Fee Receipt</title>
+//       <style>
+//         body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+//         .receipt { max-width: 700px; width: 100%; background: white; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); overflow: hidden; border: 1px solid #e2e8f0; }
+//         .receipt-header { background: linear-gradient(135deg, #1e3a8a, #1e40af); color: white; padding: 24px; text-align: center; }
+//         .receipt-header h1 { margin: 0; font-size: 28px; font-weight: 700; }
+//         .receipt-header p { margin: 8px 0 0; opacity: 0.9; }
+//         .receipt-body { padding: 24px; }
+//         .info-row { display: flex; justify-content: space-between; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #e2e8f0; }
+//         .info-label { font-weight: 600; color: #4b5563; }
+//         .info-value { color: #111827; }
+//         .payment-details { background: #f9fafb; border-radius: 12px; padding: 16px; margin: 20px 0; }
+//         .payment-details table { width: 100%; border-collapse: collapse; }
+//         .payment-details td { padding: 8px 0; }
+//         .payment-details td:last-child { text-align: right; font-weight: 600; }
+//         .total { font-size: 18px; font-weight: 700; border-top: 2px solid #e2e8f0; margin-top: 12px; padding-top: 12px; }
+//         .footer { text-align: center; margin-top: 24px; font-size: 12px; color: #6b7280; border-top: 1px solid #e2e8f0; padding-top: 16px; }
+//         button { background: #1e40af; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; margin-top: 16px; }
+//         button:hover { background: #1e3a8a; }
+//         @media print { body { background: white; padding: 0; } .receipt { box-shadow: none; border: none; } button { display: none; } }
+//       </style>
+//     </head>
+//     <body>
+//       <div class="receipt">
+//         <div class="receipt-header">
+//           <h1>CAMPUS FLOW</h1>
+//           <p>Official Fee Receipt</p>
+//         </div>
+//         <div class="receipt-body">
+//           <div class="info-row"><span class="info-label">Receipt No.</span><span class="info-value">${receiptId}</span></div>
+//           <div class="info-row"><span class="info-label">Date</span><span class="info-value">${paidDate}</span></div>
+//           <div class="info-row"><span class="info-label">Student Name</span><span class="info-value">${student.name}</span></div>
+//           <div class="info-row"><span class="info-label">Enrollment No.</span><span class="info-value">${student.enrollmentNum}</span></div>
+//           <div class="info-row"><span class="info-label">Department</span><span class="info-value">${student.department?.name || 'N/A'}</span></div>
+//           <div class="info-row"><span class="info-label">Current Semester</span><span class="info-value">${student.semesterID?.semesterName || 'N/A'}</span></div>
+//           <div class="payment-details">
+//             <table>
+//               <tr><td>Semester ${fee.semester} Fee</td><td>₹${amountRupees}</td></tr>
+//             </table>
+//             <div class="total"><div style="display: flex; justify-content: space-between;"><span>Total Paid</span><span>₹${amountRupees}</span></div></div>
+//           </div>
+//           <div class="footer">
+//             <p>This is a computer-generated receipt. No signature required.</p>
+//             <p>Thank you for using Campus Flow.</p>
+//           </div>
+//         </div>
+//         <div style="text-align: center; padding: 0 24px 24px;"><button onclick="window.print()">Print / Save as PDF</button></div>
+//       </div>
+//     </body>
+//     </html>`;
+//     res.send(html);
+//   } catch (error) {
+//     console.error('Receipt error:', error);
+//     res.status(500).send('Server error');
+//   }
+// });
+
 module.exports = router;

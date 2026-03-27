@@ -9,6 +9,7 @@ const router = express.Router();
 // Destination: uploads/syllabus
 const uploadDir = path.join(__dirname, '../uploads/syllabus');
 
+
 // Create directory if it doesn't exist
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
