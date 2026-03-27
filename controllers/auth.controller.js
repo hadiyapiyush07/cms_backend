@@ -253,13 +253,17 @@ const adminLogin = async (req, res) => {
 // @route   POST /api/auth/forgot-password
 // @access  Public
 const forgotPassword = async (req, res) => {
+  console.log(' forgotPassword called');
   try {
     const { email } = req.body;
+    console.log('📧 Received email:', email);
+
     if (!email) {
+      console.log('❌ No email provided');
       return res.status(400).json({ success: false, message: 'Email is required' });
     }
 
-    // Search user across all three collections
+    // Search user
     let user = await Student.findOne({ email: email.toLowerCase() });
     let role = user ? 'student' : null;
     if (!user) {
@@ -271,48 +275,65 @@ const forgotPassword = async (req, res) => {
       role = user ? 'admin' : null;
     }
 
-    // Always return generic message
+    console.log('🔍 User found:', !!user, 'Role:', role);
+
+    // Generic response if no user
     if (!user) {
+      console.log('⚠️ No user, returning generic success');
       return res.status(200).json({
         success: true,
         message: 'If an account exists with that email, an OTP has been sent.'
       });
     }
 
+    console.log('👤 User ID:', user._id);
+
     // Generate OTP and hash
     const otp = crypto.randomInt(100000, 999999).toString();
     const otpHash = await bcrypt.hash(otp, 10);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    console.log('🔐 OTP generated:', otp);
 
-    // Remove any existing OTP records for this email
+    // Delete old records
     await PasswordReset.deleteMany({ email: email.toLowerCase() });
+    console.log('🗑️ Old records deleted');
 
-    // Save new OTP record with userId
+    // Create new record
+    console.log('💾 Attempting to save PasswordReset...');
     await PasswordReset.create({
       email: email.toLowerCase(),
       role,
-      userId: user._id,
+      userId: user._id,         
       otpHash,
       expiresAt
     });
+    console.log('✅ PasswordReset saved');
 
     // Send email (catch error silently)
     try {
       await sendOtpEmail(email, otp);
-      console.log(`OTP for ${email}: ${otp}`); // for development only
+      console.log('📧 Email sent (or attempted)');
     } catch (emailErr) {
-      console.error('Email send failed:', emailErr);
+      console.error('❌ Email send failed:', emailErr);
     }
 
+    console.log('✅ Sending final JSON response');
     res.status(200).json({
       success: true,
       message: 'If an account exists with that email, an OTP has been sent.'
     });
+    console.log('🎯 Response sent');
   } catch (error) {
-    console.error('Forgot password error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('🔥 CRITICAL ERROR in forgotPassword:', error);
+    // Ensure we always send a JSON response
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    } else {
+      console.log('⚠️ Headers already sent, cannot send error response');
+    }
   }
 };
+
 
 // @desc    Verify OTP and issue reset token
 // @route   POST /api/auth/verify-otp
@@ -458,7 +479,10 @@ const changePassword = async (req, res) => {
       Model = Student;
     } else if (role === "professor") {
       Model = Professor;
-    } else {
+    } else if (role === "admin") {
+      Model = Admin;
+    }
+    else {
       return res.status(400).json({
         success: false,
         message: "Invalid user role"

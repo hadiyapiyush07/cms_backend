@@ -30,7 +30,9 @@ require("./models/Student");
 require("./models/Professor");
 require("./models/Admin");     
 require("./models/PasswordReset");  
-require("./models/Department");   
+require("./models/Department");  
+require('./models/Fee'); 
+require('./models/PaymentOrder');
 const Semester = require("./models/Semester");
 
 //  Import routes
@@ -48,6 +50,7 @@ const syllabusRoutes = require('./routes/syllabus.routes');
 const assignmentRoutes = require('./routes/assignment.routes');
 const path = require('path');
 const subjectRoutes = require("./routes/subject.routes");
+const feeRoutes = require('./routes/fee.routes');
 
 //  Test route
 app.get("/api/test", (req, res) => {
@@ -94,6 +97,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/syllabus', syllabusRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use("/api/subjects",SubjectRoutes);
+app.use('/api/fees', feeRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/uploads', express.static('uploads'));
 app.use('/api/subjects',subjectRoutes);
