@@ -21,6 +21,36 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
 
+router.post('/create-order', protect, authorize('student'), async (req, res) => {
+  try {
+    let fee = await Fee.findOne({ student: req.user._id });
+    if (!fee) {
+      fee = new Fee({
+        student: req.user._id,
+        amount: 50000, // ₹500
+        paid: false,
+      });
+      await fee.save();
+    }
+    if (fee.paid) {
+      return res.status(400).json({ success: false, message: 'Fee already paid' });
+    }
+    const options = {
+      amount: fee.amount,
+      currency: 'INR',
+      receipt: `receipt_${fee._id}`,
+      payment_capture: 1,
+    };
+    const order = await razorpay.orders.create(options);
+    fee.orderId = order.id;
+    await fee.save();
+    res.json({ success: true, orderId: order.id, amount: fee.amount, key: process.env.RAZORPAY_KEY_ID });
+  } catch (error) {
+    console.error('Order creation error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET all notifications (student gets only his department, with read status)
 router.get('/', protect, async (req, res) => {
   try {
