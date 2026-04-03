@@ -29,7 +29,7 @@ const professorSchema = new mongoose.Schema({
     minlength: [6, 'Password must be at least 6 characters']
   },
 
-  // ✅ FOREIGN KEY (Department)
+  //  FOREIGN KEY (Department)
   department: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Department",
@@ -57,7 +57,7 @@ const professorSchema = new mongoose.Schema({
     default: Date.now
   },
 
-  // ✅ FOREIGN KEY (Subjects)
+  //  FOREIGN KEY (Subjects)
   coursesTaught: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject"
@@ -82,7 +82,7 @@ const professorSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-// ✅ Virtual for full profile info
+//  Virtual for full profile info
 professorSchema.virtual('fullProfile').get(function() {
   return {
     id: this._id,
@@ -95,27 +95,27 @@ professorSchema.virtual('fullProfile').get(function() {
   };
 });
 
-// ✅ Method to compare password (consider using bcrypt in production)
+//  Method to compare password (consider using bcrypt in production)
 professorSchema.methods.comparePassword = function(candidatePassword) {
   // In production, use bcrypt.compare()
   return candidatePassword === this.password;
 };
 
-// ✅ Method to sanitize professor data (remove sensitive info)
+//  Method to sanitize professor data (remove sensitive info)
 professorSchema.methods.toJSON = function() {
   const professor = this.toObject();
   delete professor.password;
   return professor;
 };
 
-// ✅ Static method to find professors by department
+//  Static method to find professors by department
 professorSchema.statics.findByDepartment = function(departmentId) {
   return this.find({ department: departmentId })
     .populate('department', 'name')
     .populate('coursesTaught', 'name code');
 };
 
-// ✅ Static method to find active professors
+//  Static method to find active professors
 professorSchema.statics.findActive = function() {
   return this.find({ isActive: true })
     .populate('department', 'name')

@@ -2,15 +2,15 @@
 const Student = require("../models/Student");
 const Professor = require("../models/Professor");
 const Admin = require("../models/Admin");
-const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
+const crypto = require('crypto');// For OTP & reset token generation
+const bcrypt = require('bcryptjs');// For hashing & comparing passwords
 const PasswordReset = require('../models/PasswordReset');
 const { sendOtpEmail } = require('../services/emailService');
 const jwt = require("jsonwebtoken");
 
 const generateToken = (id, role) => {
   return jwt.sign(
-    { id, role },
+    { id, role }, // payload
     process.env.JWT_SECRET || "campusflow_secret_key",
     { expiresIn: "7d" }
   );
@@ -294,7 +294,7 @@ const forgotPassword = async (req, res) => {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     console.log('🔐 OTP generated:', otp);
 
-    // Delete old records
+    // Delete old password
     await PasswordReset.deleteMany({ email: email.toLowerCase() });
     console.log('🗑️ Old records deleted');
 
