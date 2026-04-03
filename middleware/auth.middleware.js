@@ -1,7 +1,7 @@
-const jwt = require("jsonwebtoken");
-const Student = require("../models/Student");
-const Professor = require("../models/Professor");
-const Admin = require("../models/Admin");
+const jwt = require("jsonwebtoken"); // Import JWT library for token verification
+const Student = require("../models/Student"); // Student model
+const Professor = require("../models/Professor"); // Professor model
+const Admin = require("../models/Admin"); // Admin model
 
 const protect = async (req, res, next) => {
   try {
@@ -12,6 +12,7 @@ const protect = async (req, res, next) => {
       token = req.headers.authorization.split(" ")[1];
     }
 
+     // If no token → user is not logged in
     if (!token) {
       console.log("❌ No token provided");
       return res.status(401).json({
@@ -20,11 +21,12 @@ const protect = async (req, res, next) => {
       });
     }
 
-    // Verify token
+      // Verify token using secret key → decode payload (id, role)
     const decoded = jwt.verify(token, process.env.JWT_SECRET || "campusflow_secret_key");
     console.log("✅ Decoded token:", decoded); // Log role and id for debugging
 
     // Get user based on role
+    // Find user based on role from decoded token
     let user;
     if (decoded.role === "student") {
       user = await Student.findById(decoded.id);
@@ -34,8 +36,9 @@ const protect = async (req, res, next) => {
       user = await Admin.findById(decoded.id).select("-password");
     }
 
+    // If user not found in DB → invalid token or deleted user
     if (!user) {
-      console.log(`❌ User not found for role ${decoded.role} with id ${decoded.id}`);
+      console.log(` User not found for role ${decoded.role} with id ${decoded.id}`);
       return res.status(401).json({
         success: false,
         message: "User not found"
@@ -43,6 +46,7 @@ const protect = async (req, res, next) => {
     }
 
     // Check isActive only if the field exists and is explicitly false
+    // Check if account is deactivated (only if field exists)
     if (user.isActive !== undefined && user.isActive === false) {
       console.log(`❌ Account deactivated for user ${user.email}`);
       return res.status(403).json({
@@ -51,9 +55,9 @@ const protect = async (req, res, next) => {
       });
     }
 
-    req.user = user;
-    req.userRole = decoded.role;
-    next();
+    req.user = user;   // Attach user data to request
+    req.userRole = decoded.role;  // Attach user data to request
+    next(); // Move to next middleware or route
 
   } catch (error) {
     console.error("❌ Auth middleware error:", error.message);
@@ -69,13 +73,14 @@ const protect = async (req, res, next) => {
         message: "Token expired"
       });
     }
-    next(error);
+    next(error);  // Pass other errors to global handler
   }
 };
 
 // Role-based authorization
 const authorize = (...roles) => {
   return (req, res, next) => {
+    // Check if user is authenticated (protect must run first)
     if (!req.userRole) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
@@ -90,4 +95,4 @@ const authorize = (...roles) => {
   };
 };
 
-module.exports = { protect, authorize };
+module.exports = { protect, authorize };  // Export middlewares

@@ -49,7 +49,7 @@ router.get('/dashboard', protect, authorize('admin'), async (req, res) => {
 // @access  Private (Admin only)
 router.get('/students', protect, authorize('admin'), async (req, res) => {
   try {
-    const { page = 1, limit = 10, search, department, semester } = req.query;
+    const { page = 1, limit = 50, search, department, semester } = req.query;
     const query = {};
 
     if (search) {

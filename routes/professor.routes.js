@@ -443,7 +443,7 @@ router.get('/attendance/subjects/:subjectId/students', protect, authorize('profe
   }
 });
 
-// GET attendance for a subject on a specific date (professor report)
+
 router.get('/attendance/subject/:subjectId/date/:date', protect, authorize('professor'), async (req, res) => {
   try {
     const { subjectId, date } = req.params;
@@ -451,34 +451,48 @@ router.get('/attendance/subject/:subjectId/date/:date', protect, authorize('prof
     if (!subject) {
       return res.status(404).json({ success: false, message: 'Subject not found' });
     }
+
     // Verify professor teaches this subject
     const professor = await Professor.findById(req.user._id);
     if (!professor.coursesTaught.includes(subjectId)) {
       return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
     }
+
     // Get all students in the subject's department and semester
     const students = await Student.find({
       department: subject.department._id,
       semesterID: subject.semester._id,
     }).select('name enrollmentNum email');
+
     // Fetch attendance records for this subject and date
     const attendanceRecords = await Attendance.find({
       subject: subjectId,
-      date: date, // assuming date is stored as string YYYY-MM-DD
+      date: date,
       student: { $in: students.map(s => s._id) }
     });
-    // Map status to each student
+
+    // Determine if a session exists for this date
+    const hasSession = attendanceRecords.length > 0;
+
+    // Map status to each student (default 'absent' only if session exists)
     const attendanceMap = new Map();
     attendanceRecords.forEach(rec => {
       attendanceMap.set(rec.student.toString(), rec.status);
     });
+
     const result = students.map(student => ({
       _id: student._id,
       name: student.name,
       enrollmentNum: student.enrollmentNum,
       status: attendanceMap.get(student._id.toString()) || 'absent'
     }));
-    res.json({ success: true, data: result });
+
+    // Return both data and the session flag
+    res.json({
+      success: true,
+      data: result,
+      hasSession: hasSession
+    });
   } catch (error) {
     console.error('Error fetching attendance:', error);
     res.status(500).json({ success: false, message: error.message });
