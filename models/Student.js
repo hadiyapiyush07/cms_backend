@@ -144,7 +144,7 @@ const studentSchema = new mongoose.Schema(
       max: 3,
     },
 
-    // ========== 10th Qualification Details ==========
+    // ========== 10th (SSC) Qualification Details ==========
     tenthBoard: {
       type: String,
       trim: true,
@@ -164,7 +164,7 @@ const studentSchema = new mongoose.Schema(
       default: null,
     },
 
-    // ========== 12th Qualification Details ==========
+    // ========== 12th (HSC) Qualification Details ==========
     twelfthBoard: {
       type: String,
       trim: true,
@@ -186,6 +186,42 @@ const studentSchema = new mongoose.Schema(
     twelfthTotalMarks: {
       type: Number,
       default: null,
+    },
+
+    // ========== Bachelor Degree Details (only for PG / Master students) ==========
+    // These fields are filled when the student is enrolled in MBA, MCA, MCom etc.
+    bachelorDegree: {
+      type: String,
+      trim: true,
+      default: '',   // e.g. "BCA", "B.Sc", "B.Com"
+    },
+    bachelorSpecialization: {
+      type: String,
+      trim: true,
+      default: '',   // e.g. "Computer Science"
+    },
+    bachelorBoard: {
+      type: String,
+      trim: true,
+      default: '',   // University / Board name e.g. "GTU", "Mumbai University"
+    },
+    bachelorAdmitNumber: {
+      type: String,
+      trim: true,
+      default: '',   // Roll / Enrollment number of bachelor degree
+    },
+    bachelorPassingYear: {
+      type: Number,
+      default: null,
+    },
+    bachelorCGPA: {
+      type: Number,
+      default: null,   // e.g. 7.85 (out of 10)
+    },
+    bachelorGrade: {
+      type: String,
+      trim: true,
+      default: '',     // e.g. "First Class with Distinction", "A+"
     },
 
     // ========== System Fields ==========

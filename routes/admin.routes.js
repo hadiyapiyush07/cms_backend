@@ -90,6 +90,85 @@ router.get('/students', protect, authorize('admin'), async (req, res) => {
   }
 });
 
+// ========== Auto‑generate a unique 12‑digit enrollment number ==========
+// @route   GET /api/admin/students/next-enrollment
+// @access  Private (Admin only)
+router.get('/students/next-enrollment', protect, authorize('admin'), async (req, res) => {
+  try {
+    const { year, department } = req.query;
+    if (!year || !department) {
+      return res.status(400).json({ success: false, message: 'Year and department are required' });
+    }
+
+    // 1. Get department and its 2‑digit code
+    const Department = require('../models/Department');
+    const dept = await Department.findById(department);
+    if (!dept) {
+      return res.status(404).json({ success: false, message: 'Department not found' });
+    }
+
+    // Define a mapping from department name → 2‑digit code
+    // You can also store a 'code' field directly in the Department model – more flexible.
+    const deptCodeMap = {
+      'BCA': '01', 'BBA': '02', 'BCOM': '03',
+      'MCA': '04', 'MBA': '05', 'MCOM': '06'
+    };
+    const deptName = dept.name.toUpperCase().replace(/[\s.]/g, '');
+    let deptCode = deptCodeMap[deptName];
+    if (!deptCode) {
+      // Fallback: first two letters + '0' (e.g., "CS0")
+      deptCode = (deptName.substring(0, 2) + '0').toUpperCase();
+    }
+
+    // 2. Determine the middle part (e.g., "21" from "2021")
+    //    In your examples: 202401210315 → middle "21" (batch start year last 2 digits)
+    //                       202501010001 → middle "01" (??)
+    // We'll assume the middle part is the last two digits of the admission year.
+    // If you need a different logic (batch year), adjust here.
+    const middlePart = year.slice(-2);   // "2024" → "24", "2025" → "25"
+    // Or if you want the batch start year (e.g., for 3‑year course, admission 2024 → batch 2021):
+    // const duration = (deptName.includes('BCA') || deptName.includes('BBA')) ? 3 : 2;
+    // const batchYear = parseInt(year) - (duration === 3 ? 3 : 2);
+    // const middlePart = String(batchYear).slice(-2);
+
+    // 3. Build the prefix: YYYY + deptCode + middlePart (total 8 digits)
+    const prefix = `${year}${deptCode}${middlePart}`;   // e.g., "20240124" for 2024 admission
+
+    // 4. Find the highest existing enrollment number with this prefix
+    const lastStudent = await Student.findOne({
+      enrollmentNum: { $regex: `^${prefix}` }
+    }).sort({ enrollmentNum: -1 });
+
+    let nextSeq = 1;
+    if (lastStudent) {
+      const lastNum = lastStudent.enrollmentNum;
+      // Last 4 digits are the sequence number (because total length = 12)
+      const seqPart = lastNum.slice(-4);
+      nextSeq = parseInt(seqPart, 10) + 1;
+    }
+
+    // 5. Build the full 12‑digit enrollment number
+    const enrollmentNum = `${prefix}${String(nextSeq).padStart(4, '0')}`;
+
+    // 6. Final safety check – ensure it's really unique (in case of race condition)
+    const exists = await Student.findOne({ enrollmentNum });
+    if (exists) {
+      // Very rare, but if it happens, retry once
+      const fallback = await Student.findOne({ enrollmentNum: { $regex: `^${prefix}` } }).sort({ enrollmentNum: -1 });
+      const newSeq = fallback ? parseInt(fallback.enrollmentNum.slice(-4), 10) + 1 : nextSeq + 1;
+      const finalNum = `${prefix}${String(newSeq).padStart(4, '0')}`;
+      return res.json({ success: true, enrollmentNum: finalNum });
+    }
+
+    res.json({ success: true, enrollmentNum });
+  } catch (error) {
+    console.error('Enrollment generation error:', error);
+    res.status(500).json({ success: false, message: 'Failed to generate enrollment number' });
+  }
+});
+
+
+
 // @desc    Get single student by ID
 // @route   GET /api/admin/students/:id
 // @access  Private (Admin only)
