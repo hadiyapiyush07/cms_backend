@@ -161,6 +161,7 @@ router.get('/student/attendance', protect, authorize('student'), async (req, res
       });
       
       return {
+        _id: subject._id,
         subject: subject.name,
         code: subject.code,
         totalSessions,
@@ -214,6 +215,39 @@ router.get('/student/attendance', protect, authorize('student'), async (req, res
     });
   } catch (error) {
     console.error('Error fetching student attendance:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET day-by-day attendance for a student in a specific subject
+router.get('/student/attendance/subject/:subjectId/detail', protect, authorize('student'), async (req, res) => {
+  try {
+    const studentId = req.user._id;
+    const { subjectId } = req.params;
+
+    // Fetch all attendance records for this student in this subject, sorted by date
+    const records = await Attendance.find({
+      subject: subjectId,
+      student: studentId,
+    }).select('date status').sort({ date: 1 });
+
+    // Also get all distinct dates that had a session (to include dates student was absent but session existed)
+    const allSessionDates = await Attendance.distinct('date', { subject: subjectId });
+    allSessionDates.sort();
+
+    // Build a map of student's records
+    const recordMap = new Map();
+    records.forEach(r => { recordMap.set(r.date, r.status); });
+
+    // Return one entry per session date
+    const detail = allSessionDates.map(date => ({
+      date,
+      status: recordMap.get(date) || 'absent',
+    }));
+
+    res.json({ success: true, data: detail });
+  } catch (error) {
+    console.error('Error fetching subject detail:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

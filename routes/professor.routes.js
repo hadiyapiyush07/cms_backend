@@ -329,6 +329,17 @@ router.post('/attendance/mark', protect, authorize('professor'), async (req, res
       return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
     }
     const dateStr = date; // already YYYY-MM-DD
+
+    // Check if attendance already exists for this subject on this date
+    const existing = await Attendance.findOne({ subject: subjectId, date: dateStr });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        alreadyMarked: true,
+        message: `Attendance for this subject on ${dateStr} has already been marked.`
+      });
+    }
+
     const operations = attendance.map(entry => ({
       updateOne: {
         filter: { date: dateStr, subject: subjectId, student: entry.studentId },
@@ -499,6 +510,47 @@ router.get('/attendance/subject/:subjectId/date/:date', protect, authorize('prof
   }
 });
 
+// GET overall attendance percentage per student for a specific subject
+router.get('/attendance/subject/:subjectId/percentage', protect, authorize('professor'), async (req, res) => {
+  try {
+    const { subjectId } = req.params;
+
+    // Verify professor teaches this subject
+    const professor = await Professor.findById(req.user._id);
+    if (!professor.coursesTaught.map(id => id.toString()).includes(subjectId)) {
+      return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
+    }
+
+    // Total classes held for this subject (distinct dates)
+    const totalClassesAgg = await Attendance.aggregate([
+      { $match: { subject: new mongoose.Types.ObjectId(subjectId) } },
+      { $group: { _id: '$date' } },
+      { $count: 'total' }
+    ]);
+    const totalClasses = totalClassesAgg.length > 0 ? totalClassesAgg[0].total : 0;
+
+    if (totalClasses === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Count present days per student for this subject
+    const presentAgg = await Attendance.aggregate([
+      { $match: { subject: new mongoose.Types.ObjectId(subjectId), status: 'present' } },
+      { $group: { _id: '$student', presentCount: { $sum: 1 } } }
+    ]);
+
+    const result = presentAgg.map(item => ({
+      studentId: item._id.toString(),
+      percentage: Math.round((item.presentCount / totalClasses) * 100)
+    }));
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Error fetching attendance percentage:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // NEW: GET all subjects taught by the professor (for direct subject listing)
 router.get('/attendance/subjects', protect, authorize('professor'), async (req, res) => {
   try {
@@ -513,6 +565,109 @@ router.get('/attendance/subjects', protect, authorize('professor'), async (req, 
     res.json({ success: true, data: professor.coursesTaught });
   } catch (error) {
     console.error('Error fetching subjects:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET attendance report for a subject over a date range (fromDate to toDate)
+router.get('/attendance/subject/:subjectId/range', protect, authorize('professor'), async (req, res) => {
+  try {
+    const { subjectId } = req.params;
+    const { fromDate, toDate } = req.query;
+    if (!fromDate || !toDate) {
+      return res.status(400).json({ success: false, message: 'fromDate and toDate are required' });
+    }
+
+    const subject = await Subject.findById(subjectId).populate('department semester');
+    if (!subject) {
+      return res.status(404).json({ success: false, message: 'Subject not found' });
+    }
+
+    // Verify professor teaches this subject
+    const professor = await Professor.findById(req.user._id);
+    if (!professor.coursesTaught.map(id => id.toString()).includes(subjectId)) {
+      return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
+    }
+
+    // Get all students in the subject's department and semester
+    const students = await Student.find({
+      department: subject.department._id,
+      semesterID: subject.semester._id,
+    }).select('name enrollmentNum email');
+
+    // Total distinct session dates in this range for this subject
+    const sessionDatesAgg = await Attendance.aggregate([
+      { $match: { subject: new mongoose.Types.ObjectId(subjectId), date: { $gte: fromDate, $lte: toDate } } },
+      { $group: { _id: '$date' } },
+      { $sort: { _id: 1 } }
+    ]);
+    const totalSessions = sessionDatesAgg.length;
+
+    if (totalSessions === 0) {
+      return res.json({ success: true, totalSessions: 0, data: [] });
+    }
+
+    // Count present days per student in this range
+    const presentAgg = await Attendance.aggregate([
+      {
+        $match: {
+          subject: new mongoose.Types.ObjectId(subjectId),
+          date: { $gte: fromDate, $lte: toDate },
+          status: 'present',
+          student: { $in: students.map(s => s._id) }
+        }
+      },
+      { $group: { _id: '$student', presentCount: { $sum: 1 } } }
+    ]);
+
+    const presentMap = new Map();
+    presentAgg.forEach(item => { presentMap.set(item._id.toString(), item.presentCount); });
+
+    const result = students.map(student => ({
+      _id: student._id,
+      name: student.name,
+      enrollmentNum: student.enrollmentNum,
+      presentCount: presentMap.get(student._id.toString()) || 0,
+      percentage: Math.round(((presentMap.get(student._id.toString()) || 0) / totalSessions) * 100)
+    }));
+
+    res.json({ success: true, totalSessions, data: result });
+  } catch (error) {
+    console.error('Error fetching range report:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT edit a single student's attendance for a specific subject and date
+router.put('/attendance/edit', protect, authorize('professor'), async (req, res) => {
+  try {
+    const { subjectId, studentId, date, status } = req.body;
+    if (!subjectId || !studentId || !date || !status) {
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+    if (!['present', 'absent'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Status must be present or absent' });
+    }
+
+    // Verify professor teaches this subject
+    const professor = await Professor.findById(req.user._id);
+    if (!professor.coursesTaught.map(id => id.toString()).includes(subjectId)) {
+      return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
+    }
+
+    const updated = await Attendance.findOneAndUpdate(
+      { subject: subjectId, student: studentId, date },
+      { $set: { status, recordedBy: req.user._id } },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Attendance record not found for this student on this date' });
+    }
+
+    res.json({ success: true, message: 'Attendance updated successfully', data: updated });
+  } catch (error) {
+    console.error('Error editing attendance:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
