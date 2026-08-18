@@ -414,7 +414,7 @@ router.get('/receipt/:feeId', async (req, res) => {
     const student = fee.student;
     const amountRupees = (fee.amount / 100).toFixed(2);
     const paidDate = new Date(fee.paidAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
-    const receiptId = fee.receipt || fee._id.toString();
+    const receiptId = fee.receipt ? fee.receipt.replace('receipt_', '').substring(0, 12).toUpperCase() : fee._id.toString().substring(0, 12).toUpperCase();
 
     const html = `<!DOCTYPE html>
     <html>
