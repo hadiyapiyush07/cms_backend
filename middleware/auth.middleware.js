@@ -46,8 +46,10 @@ const protect = async (req, res, next) => {
     }
 
     // Check isActive only if the field exists and is explicitly false
-    // Check if account is deactivated (only if field exists)
-    if (user.isActive !== undefined && user.isActive === false) {
+    // Check if account is deactivated
+    // For students, isActive: false means they are Alumni/Graduated, so they should still have access.
+    // For professors/admins, isActive: false might mean they are banned/deactivated.
+    if (decoded.role !== 'student' && user.isActive !== undefined && user.isActive === false) {
       console.log(`❌ Account deactivated for user ${user.email}`);
       return res.status(403).json({
         success: false,
@@ -95,4 +97,18 @@ const authorize = (...roles) => {
   };
 };
 
-module.exports = { protect, authorize };  // Export middlewares
+// SuperAdmin specific authorization
+const authorizeSuperAdmin = (req, res, next) => {
+  if (!req.userRole || req.userRole !== 'admin') {
+    return res.status(401).json({ success: false, message: 'User not authenticated' });
+  }
+  if (req.user.role !== 'SuperAdmin') {
+    return res.status(403).json({
+      success: false,
+      message: `SuperAdmin role required to access this route`
+    });
+  }
+  next();
+};
+
+module.exports = { protect, authorize, authorizeSuperAdmin };  // Export middlewares

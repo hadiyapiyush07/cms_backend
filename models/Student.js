@@ -19,6 +19,16 @@ const studentSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    degreeStatus: {
+      type: String,
+      enum: ['Pursuing', 'Completed', 'Pending Dues'],
+      default: 'Pursuing',
+    },
+    division: {
+      type: String,
+      enum: ['A', 'B', 'C'],
+      default: 'A',
+    },
 
     // ========== Personal Details ==========
     name: {

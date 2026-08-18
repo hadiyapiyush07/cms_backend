@@ -238,6 +238,8 @@ const adminLogin = async (req, res) => {
       phone: admin.phone,
       lastLogin: admin.lastLogin || admin.lastlogin,
       isActive: admin.isActive,
+      role: admin.role,
+      department: admin.department,
       createdAt: admin.createdAt
     };
 

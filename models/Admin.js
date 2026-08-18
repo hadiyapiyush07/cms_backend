@@ -37,6 +37,16 @@ const AdminSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  role: {
+    type: String,
+    enum: ['SuperAdmin', 'DepartmentAdmin'],
+    default: 'SuperAdmin'
+  },
+  department: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Department',
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now

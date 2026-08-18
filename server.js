@@ -1,3 +1,7 @@
+const dns = require('dns');
+// Force Node.js to use Google's DNS to bypass local ISP blocking the Atlas SRV query!
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+
 // server.js
 const express = require("express");
 const mongoose = require("mongoose");
@@ -132,9 +136,12 @@ app.use((req, res) => {
   });
 });
 
+const { startCronJobs } = require('./utils/cronJobs');
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(` Server Running on port ${PORT}`);
+  startCronJobs();
   console.log(` Test endpoint: http://localhost:${PORT}/api/test`);
   console.log(` Student Login: http://localhost:${PORT}/api/auth/student/login`);
   console.log(` Professor Login: http://localhost:${PORT}/api/auth/professor/login`);

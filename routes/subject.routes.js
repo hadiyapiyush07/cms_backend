@@ -13,7 +13,12 @@ const getSemesterName = (num) => `Semester ${num}`;
 // ---------------------------------------------------------------------
 router.get("/", protect, async (req, res) => {
   try {
-    const { department, semester } = req.query;
+    let { department, semester } = req.query;
+    
+    // RBAC: If Normal Admin, force their department
+    if (req.userRole === 'admin' && req.user.role === 'DepartmentAdmin') {
+      department = req.user.department;
+    }
 
     if (!department) {
       return res.status(400).json({ success: false, message: "Department ID required" });

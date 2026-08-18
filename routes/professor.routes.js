@@ -47,6 +47,28 @@ router.post("/", async (req, res) => {
       });
     }
 
+    // NEW LOGIC: Ensure subjects are assigned to only ONE professor
+    if (coursesTaught) {
+      const coursesArray = Array.isArray(coursesTaught) ? coursesTaught : [coursesTaught];
+      
+      if (coursesArray.length > 0) {
+        console.log("Creating professor, checking subject conflicts for:", coursesArray);
+        const alreadyAssigned = await Professor.findOne({
+          coursesTaught: { $in: coursesArray }
+        }).populate('coursesTaught');
+
+        if (alreadyAssigned) {
+          console.log(`Conflict found with Prof. ${alreadyAssigned.name}`);
+          const conflictSubjects = alreadyAssigned.coursesTaught.filter(s => s && coursesArray.includes(s._id.toString()));
+          const subjectNames = conflictSubjects.map(s => s.name).join(', ');
+          return res.status(400).json({
+            success: false,
+            message: `Cannot assign subjects. The following subjects are already assigned to Prof. ${alreadyAssigned.name}: ${subjectNames}`
+          });
+        }
+      }
+    }
+
     // Create professor
     const professor = await Professor.create({
       name: name.trim(),
@@ -91,13 +113,16 @@ router.post("/", async (req, res) => {
 });
 
 // 📥 GET ALL PROFESSORS (with filters)
-router.get("/", async (req, res) => {
+router.get("/", protect, async (req, res) => {
   try {
     const { department, search, page = 1, limit = 10 } = req.query;
     
     let query = {};
     
-    if (department && mongoose.Types.ObjectId.isValid(department)) {
+    // RBAC: If Normal Admin, force their department.
+    if (req.userRole === 'admin' && req.user.role === 'DepartmentAdmin') {
+      query.department = req.user.department;
+    } else if (department && mongoose.Types.ObjectId.isValid(department)) {
       query.department = department;
     }
     
@@ -205,6 +230,31 @@ router.put("/:id", async (req, res) => {
     // Only update password if provided (not empty)
     if (password && password.trim() !== '') {
       updateData.password = password;
+    }
+
+    // NEW LOGIC: Ensure subjects are assigned to only ONE professor
+    if (coursesTaught) {
+      // Ensure it's an array
+      const coursesArray = Array.isArray(coursesTaught) ? coursesTaught : [coursesTaught];
+      
+      if (coursesArray.length > 0) {
+        console.log("Checking subject conflicts for courses:", coursesArray);
+        const alreadyAssigned = await Professor.findOne({
+          _id: { $ne: req.params.id }, // Ignore THIS professor
+          coursesTaught: { $in: coursesArray }
+        }).populate('coursesTaught');
+
+        if (alreadyAssigned) {
+          console.log(`Conflict found with Prof. ${alreadyAssigned.name}`);
+          // Find which specific subjects caused the conflict
+          const conflictSubjects = alreadyAssigned.coursesTaught.filter(s => s && coursesArray.includes(s._id.toString()));
+          const subjectNames = conflictSubjects.map(s => s.name).join(', ');
+          return res.status(400).json({
+            success: false,
+            message: `Cannot assign subjects. The following subjects are already assigned to Prof. ${alreadyAssigned.name}: ${subjectNames}`
+          });
+        }
+      }
     }
     
     console.log("Updating professor with data:", updateData);
@@ -320,30 +370,62 @@ router.get('/profile/:email', async (req, res) => {
 // POST mark attendance for a specific subject on a given date
 router.post('/attendance/mark', protect, authorize('professor'), async (req, res) => {
   try {
-    const { subjectId, date, attendance } = req.body;
-    if (!subjectId || !date || !attendance || !attendance.length) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    const { subjectId, date, attendance, timeSlot, division } = req.body;
+    if (!subjectId || !date || !attendance || !attendance.length || !timeSlot || !division) {
+      return res.status(400).json({ success: false, message: 'Missing required fields (including timeSlot and division)' });
     }
     const professor = await Professor.findById(req.user._id);
     if (!professor.coursesTaught.includes(subjectId)) {
       return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
     }
-    const dateStr = date; // already YYYY-MM-DD
+    
+    // Strict Date Validation: Only allow TODAY
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (date !== todayStr) {
+      return res.status(400).json({ success: false, message: 'Attendance can only be marked for today.' });
+    }
+    
+    const dateStr = date;
 
-    // Check if attendance already exists for this subject on this date
-    const existing = await Attendance.findOne({ subject: subjectId, date: dateStr });
+    // Check if THIS PROFESSOR already marked attendance at this timeslot on this date (they can't be in two places!)
+    const professorConflict = await Attendance.findOne({ recordedBy: req.user._id, date: dateStr, timeSlot: timeSlot });
+    // It's a conflict IF it's for a different subject OR a different division!
+    if (professorConflict && (professorConflict.subject.toString() !== subjectId || professorConflict.division !== division)) {
+      return res.status(409).json({
+        success: false,
+        message: `Conflict: You already have a lecture scheduled at ${timeSlot} on ${dateStr} for another subject/division.`
+      });
+    }
+
+    // Check if attendance already exists for THIS subject + division + timeSlot on this date
+    const existing = await Attendance.findOne({ subject: subjectId, date: dateStr, timeSlot: timeSlot, division: division });
     if (existing) {
       return res.status(409).json({
         success: false,
         alreadyMarked: true,
-        message: `Attendance for this subject on ${dateStr} has already been marked.`
+        message: `Attendance for Division ${division} at ${timeSlot} on ${dateStr} has already been marked.`
+      });
+    }
+
+    // Check if THESE STUDENTS are already attending ANOTHER subject at the same time!
+    const studentIds = attendance.map(entry => entry.studentId);
+    const studentConflict = await Attendance.findOne({
+      date: dateStr,
+      timeSlot: timeSlot,
+      student: { $in: studentIds }
+    }).populate('subject', 'name');
+
+    if (studentConflict) {
+      return res.status(409).json({
+        success: false,
+        message: `Conflict: Division ${division} students already have a class for ${studentConflict.subject?.name || 'another subject'} at ${timeSlot} on ${dateStr}.`
       });
     }
 
     const operations = attendance.map(entry => ({
       updateOne: {
-        filter: { date: dateStr, subject: subjectId, student: entry.studentId },
-        update: { $set: { status: entry.status, recordedBy: req.user._id } },
+        filter: { date: dateStr, subject: subjectId, timeSlot: timeSlot, student: entry.studentId },
+        update: { $set: { status: entry.status, division: division, recordedBy: req.user._id } },
         upsert: true,
       },
     }));
@@ -443,10 +525,22 @@ router.get('/attendance/subjects/:subjectId/students', protect, authorize('profe
     if (!semesterId) {
       return res.json({ success: true, data: [] });
     }
-    const students = await Student.find({
+    const { division } = req.query;
+    const query = {
       department: subject.department._id,
       semesterID: semesterId,
-    }).select('name enrollmentNum email');
+      isActive: true, // Only show active students!
+    };
+    
+    // Existing students might not have a division field in DB yet.
+    // If asking for 'A', include those without a division.
+    if (division === 'A') {
+      query.$or = [{ division: 'A' }, { division: { $exists: false } }, { division: null }];
+    } else if (division) {
+      query.division = division;
+    }
+
+    const students = await Student.find(query).select('name enrollmentNum email division');
     res.json({ success: true, data: students });
   } catch (error) {
     console.error('Error fetching students:', error);
@@ -469,10 +563,11 @@ router.get('/attendance/subject/:subjectId/date/:date', protect, authorize('prof
       return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
     }
 
-    // Get all students in the subject's department and semester
+    // Get all active students in the subject's department and semester
     const students = await Student.find({
       department: subject.department._id,
       semesterID: subject.semester._id,
+      isActive: true,
     }).select('name enrollmentNum email');
 
     // Fetch attendance records for this subject and date
@@ -573,7 +668,7 @@ router.get('/attendance/subjects', protect, authorize('professor'), async (req, 
 router.get('/attendance/subject/:subjectId/range', protect, authorize('professor'), async (req, res) => {
   try {
     const { subjectId } = req.params;
-    const { fromDate, toDate } = req.query;
+    const { fromDate, toDate, division } = req.query;
     if (!fromDate || !toDate) {
       return res.status(400).json({ success: false, message: 'fromDate and toDate are required' });
     }
@@ -589,15 +684,27 @@ router.get('/attendance/subject/:subjectId/range', protect, authorize('professor
       return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
     }
 
-    // Get all students in the subject's department and semester
-    const students = await Student.find({
+    // Build query for students
+    const studentQuery = {
       department: subject.department._id,
       semesterID: subject.semester._id,
-    }).select('name enrollmentNum email');
+      isActive: true,
+    };
+    if (division && division !== 'All') {
+      studentQuery.division = division;
+    }
+
+    // Get all active students in the subject's department and semester (and optionally division)
+    const students = await Student.find(studentQuery).select('name enrollmentNum email division');
+
+    const matchQuery = { subject: new mongoose.Types.ObjectId(subjectId), date: { $gte: fromDate, $lte: toDate } };
+    if (division && division !== 'All') {
+      matchQuery.division = division;
+    }
 
     // Total distinct session dates in this range for this subject
     const sessionDatesAgg = await Attendance.aggregate([
-      { $match: { subject: new mongoose.Types.ObjectId(subjectId), date: { $gte: fromDate, $lte: toDate } } },
+      { $match: matchQuery },
       { $group: { _id: '$date' } },
       { $sort: { _id: 1 } }
     ]);
@@ -641,7 +748,7 @@ router.get('/attendance/subject/:subjectId/range', protect, authorize('professor
 // PUT edit a single student's attendance for a specific subject and date
 router.put('/attendance/edit', protect, authorize('professor'), async (req, res) => {
   try {
-    const { subjectId, studentId, date, status } = req.body;
+    const { subjectId, studentId, date, status, timeSlot } = req.body;
     if (!subjectId || !studentId || !date || !status) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
@@ -655,8 +762,11 @@ router.put('/attendance/edit', protect, authorize('professor'), async (req, res)
       return res.status(403).json({ success: false, message: 'Not authorized for this subject' });
     }
 
+    const query = { subject: subjectId, student: studentId, date };
+    if (timeSlot) query.timeSlot = timeSlot;
+
     const updated = await Attendance.findOneAndUpdate(
-      { subject: subjectId, student: studentId, date },
+      query,
       { $set: { status, recordedBy: req.user._id } },
       { new: true }
     );

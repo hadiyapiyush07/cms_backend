@@ -8,17 +8,10 @@ const NotificationRead = require('../models/NotificationRead');
 const Student = require('../models/Student');
 const { protect, authorize } = require('../middleware/auth.middleware');
 const { sendEmail } = require('../utils/email'); // your email utility
+const { createCloudinaryStorage } = require('../utils/cloudinary');
 
 // Multer config for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/notifications/');
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
+const storage = createCloudinaryStorage('notifications');
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
 
 router.post('/create-order', protect, authorize('student'), async (req, res) => {
@@ -84,7 +77,11 @@ router.get('/', protect, async (req, res) => {
       ]).sort('-createdAt');
     } else if (req.userRole === 'admin') {
       const filter = {};
-      if (req.query.department) filter.department = req.query.department;
+      if (req.user.role === 'DepartmentAdmin') {
+        filter.department = req.user.department;
+      } else if (req.query.department) {
+        filter.department = req.query.department;
+      }
       notifications = await Notification.find(filter)
         .populate('department', 'name code')
         .populate('createdBy', 'firstName lastName email')
@@ -118,7 +115,13 @@ router.get('/unread-count', protect, async (req, res) => {
 // POST create notification (admin only)
 router.post('/', protect, authorize('admin'), upload.array('attachments', 5), async (req, res) => {
   try {
-    const { title, content, department } = req.body;
+    let { title, content, department } = req.body;
+    
+    // RBAC: Normal Admin can only send notifications to their own department
+    if (req.userRole === 'admin' && req.user.role === 'DepartmentAdmin') {
+      department = req.user.department;
+    }
+
     if (!title || !content || !department) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
@@ -131,7 +134,7 @@ router.post('/', protect, authorize('admin'), upload.array('attachments', 5), as
         attachments.push({
           filename: file.originalname,
           fileType,
-          url: `${req.protocol}://${req.get('host')}/uploads/notifications/${file.filename}`,
+          url: file.path,
           size: file.size,
         });
       });
@@ -260,11 +263,9 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
     if (!notification) {
       return res.status(404).json({ success: false, message: 'Notification not found' });
     }
-    // Delete attached files
-    notification.attachments.forEach(att => {
-      const filePath = path.join(__dirname, '..', att.url.replace(`${req.protocol}://${req.get('host')}/`, ''));
-      fs.unlink(filePath, (err) => { if (err) console.error(err); });
-    });
+    // Skip local file deletion since attachments are in Cloudinary.
+    // In production, use cloudinary.uploader.destroy(public_id) if required.
+    
     // Delete read records
     await NotificationRead.deleteMany({ notification: notification._id });
     await notification.deleteOne();
