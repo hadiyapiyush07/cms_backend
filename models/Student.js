@@ -253,13 +253,13 @@ const studentSchema = new mongoose.Schema(
   }
 );
 
-studentSchema.pre('save', async function(next) {
+studentSchema.pre('save', async function() {
   if (!this.isModified('password')) {
-    return next();
+    return;
   }
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
-  next();
+  
 });
 
 studentSchema.methods.comparePassword = async function (candidate) {
