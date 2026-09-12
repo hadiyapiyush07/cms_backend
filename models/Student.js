@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const studentSchema = new mongoose.Schema(
   {
@@ -252,9 +253,17 @@ const studentSchema = new mongoose.Schema(
   }
 );
 
-// Plain password comparison (direct string match – consider hashing in production!)
-studentSchema.methods.comparePassword = function (candidate) {
-  return candidate === this.password;
+studentSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) {
+    return next();
+  }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+studentSchema.methods.comparePassword = async function (candidate) {
+  return await bcrypt.compare(candidate, this.password);
 };
 
 const Student = mongoose.model('Student', studentSchema);

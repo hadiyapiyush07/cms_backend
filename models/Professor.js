@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const professorSchema = new mongoose.Schema({
   name: {
@@ -95,10 +96,18 @@ professorSchema.virtual('fullProfile').get(function() {
   };
 });
 
-//  Method to compare password (consider using bcrypt in production)
-professorSchema.methods.comparePassword = function(candidatePassword) {
-  // In production, use bcrypt.compare()
-  return candidatePassword === this.password;
+professorSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) {
+    return next();
+  }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+//  Method to compare password
+professorSchema.methods.comparePassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
 //  Method to sanitize professor data (remove sensitive info)
